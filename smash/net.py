@@ -68,9 +68,9 @@ class Host:
                 return s
         return None
 
-    def poll(self, taken_slots):
-        """Read everything waiting. taken_slots: slots used by local/CPU players."""
-        now = time.time()
+    # ---- transport (UDP here; the browser version swaps these out, see webnet.py)
+    def _recv(self):
+        """Yields (message dict, sender address) for everything waiting."""
         while True:
             try:
                 data, addr = self.sock.recvfrom(65536)
@@ -81,8 +81,25 @@ class Host:
             except OSError:
                 break
             msg = unpack(data)
-            if not isinstance(msg, dict) or msg.get("g") != GAME_ID:
-                continue
+            if isinstance(msg, dict) and msg.get("g") == GAME_ID:
+                yield msg, addr
+
+    def _beacon(self, now):
+        if now - self.last_beacon > 1.0:
+            self.last_beacon = now
+            info = pack({"g": GAME_ID, "t": "beacon", "name": self.name, "port": self.port,
+                         "players": len(self.clients)})
+            for target in ("255.255.255.255", "<broadcast>"):
+                try:
+                    self.beacon.sendto(info, (target, self.port + BEACON_PORT_OFFSET))
+                    break
+                except OSError:
+                    continue
+
+    def poll(self, taken_slots):
+        """Read everything waiting. taken_slots: slots used by local/CPU players."""
+        now = time.time()
+        for msg, addr in self._recv():
             t = msg.get("t")
             c = self.clients.get(addr)
             if t == "hello":
@@ -112,23 +129,14 @@ class Host:
                     c["raw"] = msg.get("i")
             elif t == "ping":
                 c["seen"] = now
-            elif t == "bye":
+            elif t in ("bye", "_close"):
                 self.events.append(("leave", c["slot"], c["name"]))
                 del self.clients[addr]
         for addr in list(self.clients):
             if now - self.clients[addr]["seen"] > CLIENT_TIMEOUT:
                 c = self.clients.pop(addr)
                 self.events.append(("leave", c["slot"], c["name"]))
-        if now - self.last_beacon > 1.0:
-            self.last_beacon = now
-            info = pack({"g": GAME_ID, "t": "beacon", "name": self.name, "port": self.port,
-                         "players": len(self.clients)})
-            for target in ("255.255.255.255", "<broadcast>"):
-                try:
-                    self.beacon.sendto(info, (target, self.port + BEACON_PORT_OFFSET))
-                    break
-                except OSError:
-                    continue
+        self._beacon(now)
 
     def inputs(self):
         return {c["slot"]: c["raw"] for c in self.clients.values() if c["raw"] is not None}
@@ -162,8 +170,7 @@ class Client:
     def __init__(self, host_ip, name="Guest", port=NET_PORT):
         self.addr = (host_ip, port)
         self.name = name
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setblocking(False)
+        self.sock = self._make_socket()
         self.slot = None
         self.host_name = ""
         self.lobby = None        # latest lobby state from the host
@@ -184,8 +191,12 @@ class Client:
         except OSError:
             pass
 
-    def poll(self):
-        now = time.time()
+    def _make_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setblocking(False)
+        return sock
+
+    def _recv(self):
         while True:
             try:
                 data, _ = self.sock.recvfrom(65536)
@@ -196,8 +207,12 @@ class Client:
             except OSError:
                 break
             msg = unpack(data)
-            if not isinstance(msg, dict) or msg.get("g") != GAME_ID:
-                continue
+            if isinstance(msg, dict) and msg.get("g") == GAME_ID:
+                yield msg
+
+    def poll(self):
+        now = time.time()
+        for msg in self._recv():
             self.last_heard = now
             t = msg.get("t")
             if t == "welcome":
@@ -219,14 +234,14 @@ class Client:
                 if self.lobby and s.get("mid") == self.lobby.get("mid") and s.get("fr", -1) >= self.snap_frame:
                     self.snap = s
                     self.snap_frame = s["fr"]
-            elif t == "closed":
+            elif t in ("closed", "_close"):
                 self.status = "closed"
         if self.slot is None and now - self.last_hello > 0.5 and self.status == "connecting":
             self.last_hello = now
             self.send({"t": "hello", "name": self.name, "char": self.char})
         elif self.slot is not None and self.status == "lobby" and now - self.last_pick > 0.5:
             self.send_pick()
-        if now - self.last_heard > HOST_TIMEOUT and self.status not in ("full", "closed"):
+        if now - self.last_heard > HOST_TIMEOUT and self.status not in ("full", "closed", "nohost"):
             self.status = "lost"
 
     def send_pick(self):

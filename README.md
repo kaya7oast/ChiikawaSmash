@@ -93,7 +93,7 @@ behave like Smash frame data.
 
 ## Play on your phone (browser version)
 
-The game also runs in a phone browser, with touch controls and battles against CPUs. LAN play isn't available there because browsers can't do it.
+The game also runs in a browser, on phones and laptops alike, with touch controls and online rooms.
 
 1. On github.com, create a **new empty repo** called `ChiikawaSmash` (don't add a README).
 2. Double-click `connect_github.bat` to upload this folder.
@@ -110,3 +110,17 @@ Playing on the phone:
 - On iPhone, "Add to Home Screen" makes it open full screen.
 
 To try the phone layout on your PC, run `play_touch_layout.bat`. The mouse acts as a single finger.
+
+### Playing with friends online (phone and laptop together)
+
+1. One player taps **Host Room**. A 4-digit **room code** appears at the top of the screen.
+2. Everyone else opens the same link, taps **Join Room** and types the code.
+3. Each player picks a character and taps **READY!**. The host taps **FIGHT!**
+
+Notes:
+- Laptop players use the browser link too. The keyboard and mouse work as usual: J/LMB attack, K/RMB special, and so on.
+- The PC Python version only plays over LAN, so it can't join a browser room.
+- The host's device runs the match, so the strongest phone or the laptop should host.
+- Being on the same Wi-Fi always works. On mobile data, some carriers block direct connections. If someone can't join, try Wi-Fi.
+- Online play uses the free PeerJS matchmaking server (peerjs.com). After that, devices talk to each other directly.
+- In an online match, tap **||** twice to leave.

@@ -80,6 +80,31 @@ class Images:
                 if img is not None:
                     self.parts[(key, kind)] = img
         self.part_cache = {}
+        self.poses = {}
+        pdir = os.path.join(ASSET_DIR, "poses")
+        if os.path.isdir(pdir):
+            for fn in os.listdir(pdir):
+                if fn.endswith(".png"):
+                    img = self._load(os.path.join("poses", fn[:-4]))
+                    if img is not None:
+                        self.poses[fn[:-4]] = img
+
+    def pose(self, name, height, flip=False):
+        base = self.poses.get(name)
+        if base is None:
+            return None
+        height = max(6, int(height) // 2 * 2)
+        ck = ("pose", name, height, flip)
+        s = self.cache.get(ck)
+        if s is None:
+            w = max(4, int(base.get_width() * height / base.get_height()))
+            s = pygame.transform.smoothscale(base, (w, height))
+            if flip:
+                s = pygame.transform.flip(s, True, False)
+            if len(self.cache) > 400:
+                self.cache.clear()
+            self.cache[ck] = s
+        return s
 
     def part(self, key, kind, char_h_px, angle):
         """A hand/foot sprite scaled to the character's on-screen size and rotated to point along `angle`
@@ -303,6 +328,37 @@ def draw_stage(surf, cam, stage, th):
 
 
 # ------------------------------------------------------------------ fighter animation
+# ---------------------------------------------------------------- pose sprites
+# Whole-body pictures cut from the anime/wiki art for a few signature moves (assets/poses).
+# Each rule gives (image, flip, height scale vs the normal sprite, body-centre x as a fraction of the image).
+def pose_for(f):
+    if f["st"] != "attack" or not f["mv"]:
+        return None
+    ck, mv, mf, face = f["c"], f["mv"], f["mf"], f["fa"]
+    if ck == "chiikawa":
+        if mv == "bair":                         # swats behind him (art swats to the left)
+            return ("chii_bair", face < 0, 1.18, 0.62)
+        if mv in ("sspec", "onslaught"):         # flailing barrage (art swats to the left)
+            return ("chii_swat", face > 0, 1.12, 0.5)
+        if mv == "nair":                         # happy wiggle, flipping left/right
+            return ("chii_float", (mf // 6) % 2 == 1, 1.08, 0.5)
+    elif ck == "hachiware" and mv == "sspec":    # tail spin: front, back, front (flipped), back (flipped)
+        k = (mf // 4) % 4
+        name = "hachi_spin_front" if k % 2 == 0 else "hachi_spin_back"
+        fl = (k >= 2) != (face < 0)
+        return (name, fl, 1.0, 0.36 if name == "hachi_spin_front" else 0.33)
+    elif ck == "momonga":
+        if mv == "nspec":
+            return ("momo_counter", face < 0, 1.2, 0.5)
+        if mv == "counter_hit":                  # Kani dragging Momonga out of harm's way
+            return ("kani_protect", face < 0, 1.05, 0.42)
+    elif ck == "kurimanju" and mv == "dspec":
+        return ("kuri_drink" if mf < 32 else "kuri_ahh", face < 0, 1.0, 0.5)
+    elif ck == "kani" and mv == "dspec":
+        return ("kani_read", face < 0, 1.0, 0.5)
+    return None
+
+
 def body_pose(f, move):
     """Returns (scale_x, scale_y, rotation_deg_forward, offset_forward, offset_up). Positive rotation = lean forward."""
     st, sf = f["st"], f["sf"]
@@ -645,19 +701,27 @@ class Renderer:
         face = f["fa"]
         vis_h = c["h"] * 1.32
         H = cam.s(vis_h)
-        spr = self.images.sprite(f["c"], H, flip=face < 0)
+        pose = pose_for(f)
+        pspr = self.images.pose(pose[0], H * pose[2], pose[1]) if pose else None
+        self._posed = pspr is not None
+        if pspr is not None:
+            spr = pspr
+            rot = 0.0 if pose[0] != "chii_bair" else rot * 0.5
+            sx, sy = 1.0 + (sx - 1.0) * 0.5, 1.0 + (sy - 1.0) * 0.5
+        else:
+            spr = self.images.sprite(f["c"], H, flip=face < 0)
         w, h = spr.get_size()
         if abs(sx - 1) > 0.01 or abs(sy - 1) > 0.01:
             spr = pygame.transform.smoothscale(spr, (max(2, int(w * sx)), max(2, int(h * sy))))
         if f["hl"] > 0 and f["st"] == "hitstun":
             spr = spr.copy()
             spr.fill((120, 120, 120), special_flags=pygame.BLEND_RGB_ADD)
-        if f.get("bf"):
+        if f.get("bf") and pspr is None:
             spr = spr.copy()
             spr.fill((50, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
         if abs(rot) > 0.5:
             spr = pygame.transform.rotate(spr, -rot * face)
-        if f["it"]:
+        if f["it"] and pspr is None:
             spr = spr.copy()
             spr.set_alpha(120)
         fx, fy = cam.pt(f["x"], f["y"])
@@ -689,12 +753,19 @@ class Renderer:
             r.center = (int(fx), int(fy + cam.s(6)))
             pygame.draw.ellipse(surf, (255, 255, 255), r)
             pygame.draw.ellipse(surf, tuple(f["col"]), r, max(2, int(cam.s(4))))
-        self.draw_weapon(surf, f, c, move, centre, behind=True)
-        surf.blit(spr, spr.get_rect(center=(int(centre[0]), int(centre[1]))))
-        self.draw_weapon(surf, f, c, move, centre, behind=False)
-        if move:
-            self.draw_limbs(surf, f, c, move)
-            self.draw_swooshes(f, c, move)
+        if self._posed:
+            ax = 1.0 - pose[3] if pose[1] else pose[3]
+            bx = centre[0] + (0.5 - ax) * spr.get_width()
+            surf.blit(spr, spr.get_rect(center=(int(bx), int(centre[1]))))
+            if move:
+                self.draw_swooshes(f, c, move)
+        else:
+            self.draw_weapon(surf, f, c, move, centre, behind=True)
+            surf.blit(spr, spr.get_rect(center=(int(centre[0]), int(centre[1]))))
+            self.draw_weapon(surf, f, c, move, centre, behind=False)
+            if move:
+                self.draw_limbs(surf, f, c, move)
+                self.draw_swooshes(f, c, move)
         if f["st"] == "holding" or (move and f["mv"] in ("pummel", "fthrow", "bthrow", "uthrow", "dthrow", "crab_pinch")):
             v = next((o for o in snap["f"] if o["st"] == "grabbed" and abs(o["x"] - f["x"]) < 140), None)
             if v is not None:
@@ -1167,7 +1238,14 @@ class Renderer:
                 zy = centre[1] - h * 0.6 - cam.s(60 * t)
                 text(surf, "z" if i < 2 else "Z", int(max(12, cam.s(18 + 10 * t))), (150, 130, 255), (zx, zy), outline=WHITE, ow=2)
         # Momonga holding Kani out (counter) / Kani snipping back
-        if f["c"] == "momonga" and mv in ("nspec", "counter_hit"):
+        posed = getattr(self, "_posed", False)
+        if f["c"] == "momonga" and mv == "counter_hit" and posed:
+            if self.images.claw is not None and (f["mf"] // 4) % 2 == 0:
+                cimg = self.images.scaled(self.images.claw, cam.s(40), cam.s(30))
+                if face < 0:
+                    cimg = pygame.transform.flip(cimg, True, False)
+                surf.blit(cimg, cimg.get_rect(center=(int(centre[0] + face * cam.s(c["w"] * 1.5)), int(centre[1]))))
+        elif f["c"] == "momonga" and mv in ("nspec", "counter_hit") and not posed:
             big = mv == "counter_hit"
             kh = cam.s(c["h"] * (1.15 if big else 0.75))
             kimg = self.images.sprite("kani", kh, flip=face < 0)
@@ -1183,7 +1261,7 @@ class Renderer:
         if f["c"] == "kani" and mv == "dspec":
             bw, bh_ = cam.s(46), cam.s(30)
             bx, by = centre[0] + face * cam.s(22), centre[1] + h * 0.05
-            for side in (-1, 1):
+            for side in ((-1, 1) if not posed else ()):
                 page = [(bx, by - bh_ / 2), (bx + side * bw / 2, by - bh_ / 2 - cam.s(5)), (bx + side * bw / 2, by + bh_ / 2 - cam.s(5)), (bx, by + bh_ / 2)]
                 pygame.draw.polygon(surf, CREAM, page)
                 pygame.draw.polygon(surf, INK, page, 2)

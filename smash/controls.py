@@ -59,6 +59,9 @@ class Device:
         return m
 
 
+TOUCH_SEEN = [0.0]     # time of the last real finger event (phones send fake mouse clicks for every tap)
+
+
 class KeyboardDevice(Device):
     kind = "keyboard"
 
@@ -84,13 +87,16 @@ class KeyboardDevice(Device):
 
     def handle_event(self, e):
         if e.type == pygame.MOUSEBUTTONDOWN and self.mouse:
+            if TOUCH_UI and (getattr(e, "touch", False) or TOUCH_SEEN[0] > 0):
+                return False          # a finger, not a real mouse
             b = self.mouse.get(e.button)
             if b:
                 self.press(b)
-                if e.button == 1:
-                    self.menu_presses.append("ok")
-                elif e.button == 3:
-                    self.menu_presses.append("back")
+                if not TOUCH_UI:      # in the touch UI, clicks on menus are 'taps' instead
+                    if e.button == 1:
+                        self.menu_presses.append("ok")
+                    elif e.button == 3:
+                        self.menu_presses.append("back")
                 return True
             return False
         if e.type == pygame.KEYDOWN:
@@ -114,7 +120,7 @@ class KeyboardDevice(Device):
         x = (1.0 if down("right") else 0.0) - (1.0 if down("left") else 0.0)
         y = (1.0 if down("down") else 0.0) - (1.0 if down("up") else 0.0)
         held = {b for b in BUTTONS if down(b)}
-        if self.mouse:
+        if self.mouse and not TOUCH_SEEN[0]:
             try:
                 mb = pygame.mouse.get_pressed()
                 for btn, name in self.mouse.items():
@@ -246,9 +252,9 @@ class TouchDevice(Device):
         self.fingers = {}          # finger id -> "stick" / button name / "pause"
         self.stick_origin = None
         self.stick_pos = None
-        self.active = False        # becomes True the first time the screen is touched
+        self.active = False        # becomes True the first time the screen is touched (laptops never see the buttons)
         self.pause_req = False
-        self.visible = TOUCH_UI
+        self.visible = MOUSE_IS_TOUCH
 
     @staticmethod
     def to_screen(e):
@@ -267,6 +273,7 @@ class TouchDevice(Device):
             return False
         self.active = True
         self.visible = True
+        TOUCH_SEEN[0] = time.time()
         x, y = self.to_screen(e)
         fid = e.finger_id
         if e.type == pygame.FINGERDOWN:
@@ -347,13 +354,52 @@ class TouchDevice(Device):
         pygame.draw.rect(surf, (60, 40, 35), pygame.Rect(x + 3, y - 11, 6, 22))
 
 
+class MergedDevice(Device):
+    """'You' in the touch UI: the touch controls AND keyboard/mouse together, so a phone or a laptop
+    (or a laptop with a touchscreen) all drive the same player."""
+    kind = "merged"
+
+    def __init__(self, subs):
+        super().__init__()
+        self.subs = subs
+        self.name = "You"
+
+    def handle_event(self, e):
+        return False
+
+    def read(self):
+        x = y = sx = sy = 0.0
+        held = set()
+        for d in self.subs:
+            dx, dy, h, ax, ay = d.read()
+            if abs(dx) > abs(x):
+                x = dx
+            if abs(dy) > abs(y):
+                y = dy
+            if ax or ay:
+                sx, sy = ax, ay
+            held |= h
+        return x, y, held, sx, sy
+
+    def raw(self):
+        r = Device.raw(self)
+        for i, b in enumerate(BUTTONS):
+            r[3 + i] = sum(d.counts[b] for d in self.subs)
+        return r
+
+    def take_menu(self):
+        out = []
+        for d in self.subs:
+            out += d.take_menu()
+        return out
+
+
 class DeviceManager:
     def __init__(self):
-        if TOUCH_UI:              # taps would otherwise also count as mouse clicks = attacks
-            KEYBOARD_1.pop("mouse", None)
         self.kb1 = KeyboardDevice(KEYBOARD_1)
         self.kb2 = KeyboardDevice(KEYBOARD_2)
         self.touch = TouchDevice()
+        self.you = MergedDevice([self.touch, self.kb1])
         self.taps = []            # screen positions tapped this frame (for menus)
         self.last_finger = 0.0
         self.pads = {}

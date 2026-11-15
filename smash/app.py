@@ -19,6 +19,29 @@ def _net():
     """LAN code is only loaded when you actually host/join (browsers can't do UDP)."""
     from . import net
     return net
+
+
+def make_host(name):
+    if IS_WEB:
+        from . import webnet
+        return webnet.WebHost(name)
+    return _net().Host(name)
+
+
+def make_client(addr, name):
+    if IS_WEB:
+        from . import webnet
+        return webnet.WebClient(addr, name)
+    return _net().Client(addr, name)
+
+
+def touch_overlay(app, devices):
+    """Draw the on-screen controller if one of these devices is (or contains) the touch controls."""
+    t = app.devices.touch
+    for d in devices:
+        if d is t or t in getattr(d, "subs", ()):
+            t.draw(app.screen)
+            return
 from .render import Renderer, Background, Camera, text, font, damage_color
 from .sim import Game, GAME_END_FRAMES
 from .stages import STAGES, STAGE_ORDER
@@ -110,7 +133,7 @@ class MenuBackdrop:
 
 # ====================================================================== title
 class TitleScene(Scene):
-    ITEMS = (["Battle vs CPU", "Controls"] if IS_WEB else
+    ITEMS = (["Battle vs CPU", "Host Room", "Join Room", "Controls"] if IS_WEB else
              ["Local Battle", "Host LAN Game", "Join LAN Game", "Controls", "Name", "Quit"])
 
     def __init__(self, app, message=""):
@@ -150,6 +173,13 @@ class TitleScene(Scene):
         item = self.ITEMS[self.sel]
         if item in ("Local Battle", "Battle vs CPU"):
             self.app.go(CharSelectScene(self.app, hosting=False))
+        elif item == "Host Room":
+            try:
+                self.app.go(CharSelectScene(self.app, hosting=True))
+            except Exception as ex:
+                self.message, self.message_t = "Couldn't open a room: %s" % ex, 300
+        elif item == "Join Room":
+            self.app.go(RoomJoinScene(self.app))
         elif item == "Host LAN Game":
             try:
                 self.app.go(CharSelectScene(self.app, hosting=True))
@@ -262,7 +292,7 @@ class CharSelectScene(Scene):
         self.hosting = hosting
         self.host = host
         if hosting and host is None:
-            self.host = _net().Host(app.settings["name"])
+            self.host = make_host(app.settings["name"])
         self.slots = keep_slots or [None] * MAX_PLAYERS   # dicts: kind local/cpu, device, char, ok, level
         self.back = MenuBackdrop("sunset" if hosting else "day")
         s = app.settings
@@ -276,10 +306,11 @@ class CharSelectScene(Scene):
         self.portrait_rects = []
         self.card_rects = []
         self.touch_buttons = {}
-        if TOUCH_UI and not hosting and keep_slots is None:
-            # phone: you're P1 on the touch controls, with one CPU ready to go
-            self.slots[0] = {"kind": "local", "device": app.devices.touch, "char": 0, "ok": False}
-            self.add_cpu()
+        if TOUCH_UI and keep_slots is None:
+            # phone/browser: you're P1 (touch + keyboard + mouse together); vs-CPU starts with one CPU
+            self.slots[0] = {"kind": "local", "device": app.devices.you, "char": 0, "ok": False}
+            if not hosting:
+                self.add_cpu()
 
     # ---------- helpers
     def remote(self):
@@ -299,7 +330,7 @@ class CharSelectScene(Scene):
 
     def slot_of(self, dev):
         for i, s in enumerate(self.slots):
-            if s and s["kind"] == "local" and s["device"] is dev:
+            if s and s["kind"] == "local" and (s["device"] is dev or dev in getattr(s["device"], "subs", ())):
                 return i
         return None
 
@@ -436,7 +467,7 @@ class CharSelectScene(Scene):
                     j = self.free_slot()
                     if j is None:
                         return
-                    self.slots[j] = {"kind": "local", "device": touch, "char": k, "ok": True}
+                    self.slots[j] = {"kind": "local", "device": app.devices.you, "char": k, "ok": True}
                 else:
                     self.slots[i]["char"] = k
                     self.slots[i]["ok"] = True
@@ -509,9 +540,16 @@ class CharSelectScene(Scene):
     def draw(self, surf):
         self.back.draw(surf)
         r = self.app.renderer
-        title = "Host LAN Game" if self.hosting else "Local Battle"
+        title = ("Host Room" if IS_WEB else "Host LAN Game") if self.hosting else (
+            "Battle vs CPU" if IS_WEB else "Local Battle")
         text(surf, title, 44, WHITE, (WIDTH / 2, 40), outline=INK, ow=4)
-        if self.host:
+        if self.host and IS_WEB:
+            st = self.host.state
+            line = {"ready": "Room code:  %s   -  friends tap Join Room and type it" % self.host.ip,
+                    "connecting": "Opening room %s ..." % self.host.ip,
+                    "error": "Couldn't reach the matchmaking server - check your internet"}.get(st, "Room %s (%s)" % (self.host.ip, st))
+            text(surf, line, 24, (255, 245, 180), (WIDTH / 2, 82), outline=INK, ow=2)
+        elif self.host:
             text(surf, "Friends: Join LAN Game and type  %s  (port %d)" % (self.host.ip, NET_PORT), 22, (255, 245, 180),
                  (WIDTH / 2, 82), outline=INK, ow=2)
         # roster grid: just the character and their name
@@ -650,8 +688,13 @@ class MatchScene(Scene):
         touch = self.app.devices.touch
         if touch.pause_req:
             touch.pause_req = False
-            if not self.host:          # never pause a LAN match
+            if not self.host:          # never pause an online match: || twice ends it instead
                 self.paused = not self.paused
+            elif self.esc_t > 0:
+                self.back_to_lobby()
+                return
+            else:
+                self.esc_t = 120
         if self.paused:
             if tapped(self.app, self.pause_rects.get("resume", pygame.Rect(0, 0, 0, 0))):
                 self.paused = False
@@ -692,11 +735,10 @@ class MatchScene(Scene):
 
     def draw(self, surf):
         self.app.renderer.draw(surf, self.snap, local_slots=tuple(self.devices.keys()))
-        touch = self.app.devices.touch
-        if touch in self.devices.values():
-            touch.draw(surf)
+        touch_overlay(self.app, self.devices.values())
         if self.esc_t > 0:
-            text(surf, "press Esc again to end the match", 22, WHITE, (WIDTH / 2, 30), outline=INK)
+            text(surf, "tap || again to end the match" if TOUCH_UI else "press Esc again to end the match", 22, WHITE,
+                 (WIDTH / 2, 130 if TOUCH_UI else 30), outline=INK)
         if self.paused:
             dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             dim.fill((30, 20, 25, 140))
@@ -822,7 +864,7 @@ class JoinScene(Scene):
         self.app.settings["last_ip"] = ip
         save_settings(self.app.settings)
         self.leave()
-        client = _net().Client(ip, self.app.settings["name"])
+        client = make_client(ip, self.app.settings["name"])
         self.app.go(ClientLobbyScene(self.app, client))
 
     def leave(self):
@@ -868,13 +910,80 @@ class JoinScene(Scene):
         text(surf, "Up/Down to choose, Enter to join, Esc to go back", 16, (150, 90, 100), (box.centerx, box.bottom - 22))
 
 
+class RoomJoinScene(Scene):
+    """Browser version: type the host's 4-digit room code on a big number pad."""
+    KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK"]
+
+    def __init__(self, app, message=""):
+        super().__init__(app)
+        self.code = ""
+        self.back = MenuBackdrop("night")
+        self.rects = {}
+        self.message = message
+
+    def event(self, e):
+        if e.type != pygame.KEYDOWN:
+            return
+        if e.key == pygame.K_ESCAPE:
+            self.app.go(TitleScene(self.app))
+        elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.connect()
+        elif e.key == pygame.K_BACKSPACE:
+            self.code = self.code[:-1]
+        elif e.unicode and e.unicode.isdigit() and len(self.code) < 4:
+            self.code += e.unicode
+        self.app.devices.clear_menu()
+
+    def connect(self):
+        if len(self.code) != 4:
+            self.message = "Room codes have 4 numbers"
+            return
+        self.app.go(ClientLobbyScene(self.app, make_client(self.code, self.app.settings["name"])))
+
+    def update(self):
+        super().update()
+        self.app.devices.clear_menu()
+        for k, rc in self.rects.items():
+            if tapped(self.app, rc):
+                if k == "back":
+                    self.app.go(TitleScene(self.app))
+                elif k == "OK":
+                    self.connect()
+                elif k == "<":
+                    self.code = self.code[:-1]
+                elif len(self.code) < 4:
+                    self.code += k
+                return
+
+    def draw(self, surf):
+        self.back.draw(surf)
+        text(surf, "Join Room", 48, WHITE, (WIDTH / 2, 50), outline=INK, ow=4)
+        field = pygame.Rect(WIDTH / 2 - 170, 96, 340, 78)
+        panel(surf, field, alpha=240, border=INK)
+        shown = " ".join(self.code[i] if i < len(self.code) else "_" for i in range(4))
+        text(surf, shown, 50, INK, field.center)
+        if self.message:
+            text(surf, self.message, 20, (255, 210, 210), (WIDTH / 2, 196), outline=INK, ow=2)
+        self.rects = {}
+        bw, bh, gap = 130, 96, 14
+        x0 = WIDTH / 2 - (3 * bw + 2 * gap) / 2
+        for i, k in enumerate(self.KEYS):
+            r = pygame.Rect(int(x0 + (i % 3) * (bw + gap)), int(216 + (i // 3) * (bh + gap)), bw, bh)
+            col = (255, 120, 140) if k == "OK" else (255, 245, 250)
+            self.rects[k] = button(surf, r, "JOIN" if k == "OK" else k, col=col, size=40 if k.isdigit() else 30,
+                                   txt=WHITE if k == "OK" else INK)
+        self.rects["back"] = button(surf, pygame.Rect(30, 30, 130, 64), "BACK", size=24)
+        text(surf, "Ask the host for the code on their screen", 18, WHITE, (WIDTH / 2, HEIGHT - 20), outline=INK)
+
+
 class ClientLobbyScene(Scene):
     def __init__(self, app, client):
         super().__init__(app)
         self.client = client
-        self.device = None
+        self.device = app.devices.you if TOUCH_UI else None
         self.back = MenuBackdrop("sunset")
         self.char_i = ROSTER.index(client.char) if client.char in ROSTER else 0
+        self.btns = {}
 
     def event(self, e):
         if e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
@@ -885,20 +994,39 @@ class ClientLobbyScene(Scene):
         super().update()
         c = self.client
         c.poll()
-        if c.status in ("lost", "closed", "full"):
-            msg = {"lost": "Couldn't reach the host (check the IP / firewall / same Wi-Fi)",
-                   "closed": "The host closed the game", "full": "That game is full"}[c.status]
+        if c.status in ("lost", "closed", "full", "nohost"):
+            msg = {"lost": "Couldn't reach the host" + (" (try both on the same Wi-Fi)" if IS_WEB else
+                                                           " (check the IP / firewall / same Wi-Fi)"),
+                   "closed": "The host closed the game", "full": "That game is full",
+                   "nohost": "No room with code %s" % getattr(c, "code", "")}[c.status]
             c.close()
-            self.app.go(TitleScene(self.app, msg))
+            self.app.go(RoomJoinScene(self.app, msg) if IS_WEB and c.status == "nohost" else TitleScene(self.app, msg))
             return
+        # taps: < > to pick, READY, LEAVE
+        for k, rc in self.btns.items():
+            if tapped(self.app, rc):
+                if k == "leave":
+                    c.close()
+                    self.app.go(TitleScene(self.app))
+                    return
+                if k == "prev" and not c.ready:
+                    self.char_i = (self.char_i - 1) % len(ROSTER)
+                elif k == "next" and not c.ready:
+                    self.char_i = (self.char_i + 1) % len(ROSTER)
+                elif k == "ready":
+                    c.ready = not c.ready
+                c.char = ROSTER[self.char_i]
+                c.send_pick()
+                break
         if c.status == "match" and c.snap is not None and c.lobby and c.lobby.get("phase") == "match":
             dev = self.device or self.app.devices.kb1
+            self.app.devices.touch.pause_req = False
             self.app.go(ClientMatchScene(self.app, c, dev))
             return
         for d, m in self.menu_presses():
             if self.device is None:
                 self.device = d
-            if d is not self.device:
+            if d is not self.device and d not in getattr(self.device, "subs", ()):
                 continue
             if m in ("left", "up") and not c.ready:
                 self.char_i = (self.char_i - 1) % len(ROSTER)
@@ -919,7 +1047,10 @@ class ClientLobbyScene(Scene):
         r = self.app.renderer
         if c.status == "connecting":
             text(surf, "Connecting to %s ..." % c.addr[0], 36, WHITE, (WIDTH / 2, HEIGHT / 2), outline=INK, ow=3)
-            text(surf, "Esc to cancel", 18, WHITE, (WIDTH / 2, HEIGHT / 2 + 50), outline=INK)
+            if TOUCH_UI:
+                self.btns = {"leave": button(surf, pygame.Rect(WIDTH / 2 - 90, HEIGHT / 2 + 50, 180, 64), "CANCEL", size=24)}
+            else:
+                text(surf, "Esc to cancel", 18, WHITE, (WIDTH / 2, HEIGHT / 2 + 50), outline=INK)
             return
         text(surf, "Joined %s's game" % c.host_name, 40, WHITE, (WIDTH / 2, 44), outline=INK, ow=3)
         # my pick
@@ -932,8 +1063,18 @@ class ClientLobbyScene(Scene):
         surf.blit(spr, spr.get_rect(midbottom=(box.centerx, box.y + 330 + bob)))
         ch = characters.CHARACTERS[k]
         text(surf, "< %s >" % ch["name"] if not c.ready else ch["name"], 32, ch["color"], (box.centerx, box.y + 360), outline=INK, ow=2)
-        text(surf, "READY! (right-click / B to change)" if c.ready else "A/D to pick, click / A = ready", 18,
-             (60, 160, 80) if c.ready else (150, 90, 100), (box.centerx, box.bottom - 24))
+        if TOUCH_UI:
+            self.btns = {
+                "prev": button(surf, pygame.Rect(box.x + 16, box.y + 170, 70, 90), "<", size=40),
+                "next": button(surf, pygame.Rect(box.right - 86, box.y + 170, 70, 90), ">", size=40),
+                "ready": button(surf, pygame.Rect(box.x + 60, box.bottom - 86, box.w - 120, 66),
+                                "CHANGE" if c.ready else "READY!", col=(140, 210, 150) if c.ready else (255, 120, 140),
+                                size=28, txt=WHITE),
+                "leave": button(surf, pygame.Rect(30, 26, 120, 56), "LEAVE", size=20),
+            }
+        else:
+            text(surf, "READY! (right-click / B to change)" if c.ready else "A/D to pick, click / A = ready", 18,
+                 (60, 160, 80) if c.ready else (150, 90, 100), (box.centerx, box.bottom - 24))
         # lobby list
         lob = c.lobby or {}
         box2 = pygame.Rect(520, 110, 700, 470)
@@ -953,7 +1094,7 @@ class ClientLobbyScene(Scene):
             text(surf, characters.CHARACTERS.get(p["char"], ch)["name"], 17, INK, (row.x + 100, row.centery + 16), anchor="midleft")
             text(surf, "READY" if p["ok"] else "choosing", 20, (60, 160, 80) if p["ok"] else (170, 140, 140),
                  (row.right - 20, row.centery), anchor="midright")
-        text(surf, "The host starts the match. Esc = leave", 18, WHITE, (WIDTH / 2, HEIGHT - 40), outline=INK)
+        text(surf, "The host starts the match." + ("" if TOUCH_UI else " Esc = leave"), 18, WHITE, (WIDTH / 2, HEIGHT - 40), outline=INK)
 
 
 class ClientMatchScene(Scene):
@@ -978,6 +1119,14 @@ class ClientMatchScene(Scene):
         if self.esc_t > 0:
             self.esc_t -= 1
         c = self.client
+        touch = self.app.devices.touch
+        if touch.pause_req:
+            touch.pause_req = False
+            if self.esc_t > 0:
+                self.client.close()
+                self.app.go(TitleScene(self.app, "You left the match"))
+                return
+            self.esc_t = 120
         c.poll()
         c.send_input(self.device.raw())
         if c.status in ("lost", "closed"):
@@ -1000,8 +1149,10 @@ class ClientMatchScene(Scene):
         else:
             surf.fill((30, 30, 40))
             text(surf, "waiting for the host...", 30, WHITE, (WIDTH / 2, HEIGHT / 2))
+        touch_overlay(self.app, [self.device])
         if self.esc_t > 0:
-            text(surf, "press Esc again to leave", 22, WHITE, (WIDTH / 2, 30), outline=INK)
+            text(surf, "tap || again to leave" if TOUCH_UI else "press Esc again to leave", 22, WHITE,
+                 (WIDTH / 2, 130 if TOUCH_UI else 30), outline=INK)
 
 
 # ====================================================================== app

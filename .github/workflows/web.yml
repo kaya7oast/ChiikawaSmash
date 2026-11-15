@@ -27,7 +27,9 @@ jobs:
       - name: Install pygbag
         run: pip install pygbag
       - name: Leave out PC-only stuff (art sources, tools, previews) so the download is small
-        run: rm -rf art_src old tools preview_*.png play.bat
+        run: |
+          cp web/smashnet.js /tmp/smashnet.js
+          rm -rf art_src old tools web preview_*.png *.bat
       - name: Build web version
         run: python -m pygbag --build --title "Chiikawa Smash" .
       - name: Fit the 1280x720 game to any phone screen + background colour
@@ -60,9 +62,12 @@ jobs:
             });
           })();
           </script>"""
-          html = html.replace("</head>", style + "</head>", 1).replace("</body>", script + "</body>", 1)
+          # online play: PeerJS (WebRTC) + our small bridge that Python talks to
+          online = ('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>'
+                    "<script>" + open("/tmp/smashnet.js", encoding="utf-8").read() + "</script>")
+          html = html.replace("</head>", style + online + "</head>", 1).replace("</body>", script + "</body>", 1)
           open(p, "w", encoding="utf-8").write(html)
-          print("patched:", "fitGame" in html)
+          print("patched:", "fitGame" in html, "SmashNet" in html)
           PYEOF
       - uses: actions/upload-pages-artifact@v3
         with:
