@@ -12,6 +12,9 @@ from .sim import ARTS
 from .config import WIDTH, HEIGHT, ASSET_DIR, WHITE, BLACK, INK, CREAM, TOUCH_UI
 from .stages import STAGES, main_poly, ISLAND_EXTRA
 
+# Hit sparks: True = animated sprite sheets in assets/fx (Sinestesia "Hit Animation 2", CC0),
+# False = the old shapes drawn in code.
+FX_SPRITES = True
 HUD_H = 108
 HUD_TOP = TOUCH_UI          # touch controls live at the bottom, so the damage cards go to the top
 VIEW_CY = (HUD_H + (HEIGHT - HUD_H) / 2) if HUD_TOP else (HEIGHT - HUD_H) / 2   # screen y the camera centres on
@@ -80,6 +83,18 @@ class Images:
                 if img is not None:
                     self.parts[(key, kind)] = img
         self.part_cache = {}
+        # hit-spark sheets: 4x4 grid of 192px frames (loaded raw, not trimmed, so the grid stays intact)
+        self.fx_sheets = {}
+        for name in ("white", "yellow"):
+            path = os.path.join(ASSET_DIR, "fx", "hit_%s.png" % name)
+            try:
+                sheet = pygame.image.load(path).convert_alpha()
+                fw = sheet.get_width() // 4
+                self.fx_sheets[name] = [sheet.subsurface(pygame.Rect((i % 4) * fw, (i // 4) * fw, fw, fw)).copy()
+                                        for i in range(16)]
+            except (pygame.error, FileNotFoundError, OSError):
+                pass
+        self.fx_cache = {}
         self.poses = {}
         pdir = os.path.join(ASSET_DIR, "poses")
         if os.path.isdir(pdir):
@@ -88,6 +103,23 @@ class Images:
                     img = self._load(os.path.join("poses", fn[:-4]))
                     if img is not None:
                         self.poses[fn[:-4]] = img
+
+    def fx_frame(self, sheet, frame, size, rot):
+        frames = self.fx_sheets.get(sheet)
+        if not frames:
+            return None
+        size = max(8, int(size) // 8 * 8)
+        rot = int(rot) // 15 * 15
+        ck = (sheet, frame, size, rot)
+        s = self.fx_cache.get(ck)
+        if s is None:
+            s = pygame.transform.smoothscale(frames[frame], (size, size))
+            if rot:
+                s = pygame.transform.rotate(s, rot)
+            if len(self.fx_cache) > 500:
+                self.fx_cache.clear()
+            self.fx_cache[ck] = s
+        return s
 
     def pose(self, name, height, flip=False):
         base = self.poses.get(name)
@@ -1453,6 +1485,15 @@ class Renderer:
         x, y = cam.pt(e["x"], e["y"])
         s = e.get("s", 1.0)
         col = tuple(e.get("col", (255, 255, 255)))
+        if FX_SPRITES and k in SPARK_FX and self.images.fx_sheets:
+            sheet, size = SPARK_FX[k](s)
+            frame = 1 + min(10, int(p * 11))          # frames 1-11 hold the burst; the rest is near-empty
+            img = self.images.fx_frame(sheet, frame, cam.s(size), (e["id"] * 73) % 360)
+            if img is not None:
+                self.fx.blit(img, img.get_rect(center=(int(x), int(y))))
+            if k == "counter":
+                text(surf, "!", int(max(14, cam.s(40))), (90, 160, 255), (x, y - cam.s(70)), outline=WHITE)
+            return
         if k == "hit":
             n = 10
             rad = cam.s(30 + 70 * s) * (0.4 + 0.6 * p)
@@ -1632,6 +1673,18 @@ class Renderer:
 
 
 COUNTDOWN_F = 151
+
+
+# effect kind -> (sheet, on-screen size in world px) for the sprite hit sparks
+SPARK_FX = {
+    "hit": lambda s: ("yellow" if s >= 1.35 else "white", 120 + 110 * s),
+    "sweet": lambda s: ("yellow", 300),
+    "shieldbreak": lambda s: ("yellow", 340),
+    "counter": lambda s: ("white", 240),
+    "armor": lambda s: ("yellow", 130),
+    "spark": lambda s: ("white", 50 + 60 * s),
+    "clank": lambda s: ("white", 140),
+}
 
 
 def star(surf, x, y, r, col):

@@ -1161,7 +1161,12 @@ class App:
         pygame.init()
         pygame.display.set_caption(TITLE)
         try:
-            self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED | pygame.RESIZABLE)
+            if IS_WEB:
+                # browser: a plain fixed 1280x720 canvas; the page's CSS scales it to the screen.
+                # (SCALED|RESIZABLE made SDL re-scale on phone rotation -> zoomed-in, cropped picture)
+                self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+            else:
+                self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED | pygame.RESIZABLE)
         except pygame.error:
             self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
@@ -1186,7 +1191,7 @@ class App:
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
                     self.running = False
-                elif e.type == pygame.KEYDOWN and e.key == pygame.K_F11:
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_F11 and not IS_WEB:
                     pygame.display.toggle_fullscreen()
                     continue
                 elif e.type == pygame.KEYDOWN and e.key == pygame.K_F3:
