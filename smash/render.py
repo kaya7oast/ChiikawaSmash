@@ -474,6 +474,9 @@ def body_pose(f, move):
         act = a <= mf <= b + 2
         post = max(0.0, (mf - b) / max(1, m["frames"] - b))
         an = m.get("anim", "jab")
+        fr_ = m["frames"]
+        if an in V4_ANIMS:
+            return V4_ANIMS[an](mf, a, b, fr_, pre, act, post)
         if an in ("jab", "jab2", "jab3", "ftilt", "throw_fwd", "spit", "snip", "pummel", "fthrow", "grab"):
             rot = (-6 * pre if not act else 16) * (1 - post)
             ox = (10 if act else -3 * pre) * (1 - post)
@@ -570,6 +573,149 @@ def body_pose(f, move):
     return sx, sy, rot, ox, oy
 
 
+# ---- v4 ground-move body animations: (mf, first active, last active, frames, windup 0..1, active?, recovery 0..1)
+#      -> (scale_x, scale_y, lean_forward_deg, offset_forward, offset_up)
+def _a_slap2(mf, a, b, n, pre, act, post):
+    return 1.0, 1.0, (10 * math.sin(mf * 0.9) + 8 if act else -6 * pre) * (1 - post), (6 if act else 0) * (1 - post), 0
+
+
+def _a_hop(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1.0 + 0.15 * pre, 1.0 - 0.2 * pre, 0, 0, 0
+    k = 1 - post
+    return 1.0 - 0.1 * k, 1.0 + 0.14 * k, -4 * k, 0, 20 * math.sin(min(1.0, (mf - a) / 10.0) * math.pi) * k
+
+
+def _a_tumble(mf, a, b, n, pre, act, post):
+    if mf < 4:
+        return 1, 1, 10 * mf / 4, 0, 0
+    if mf <= 26:
+        return 1, 0.92, 10 + (mf - 4) * 16, 0, 0                  # forward rolls
+    k = max(0.0, (mf - (n - 10)) / 10.0)
+    return 1.05, 0.9, 90 * (1 - k), 0, -6 * (1 - k)              # face-down, then gets up
+
+
+def _a_tantrum(mf, a, b, n, pre, act, post):
+    lie = min(1.0, mf / 6.0) * (1 - post)
+    shake = math.sin(mf * 1.6) * 4 if a <= mf <= b else 0
+    return 1.05, 0.95, 80 * lie, shake, -8 * lie
+
+
+def _a_lunge(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1, 1, -10 * pre, -6 * pre, 0
+    k = 1 - post
+    return 1.05, 0.97, 18 * k, 16 * k, 0
+
+
+def _a_kneeslide(mf, a, b, n, pre, act, post):
+    k = 1 - post if mf >= 2 else mf / 2.0
+    return 1.1, 1.0 - 0.2 * k, -18 * k, 4 * k, 0
+
+
+def _a_sweep(mf, a, b, n, pre, act, post):
+    k = 1 - post
+    return 1.15, 1.0 - 0.25 * k, (-20 + 40 * min(1.0, max(0.0, (mf - a) / max(1, b - a)))) * k, 0, 0
+
+
+def _a_ganon(mf, a, b, n, pre, act, post):
+    mid = (a + b) / 2.0
+    lean = 14 if mf < mid else -14
+    return 1.1, 0.82, lean * (1 - post), 0, 0
+
+
+def _a_twirl(mf, a, b, n, pre, act, post):
+    k = 1 - post if mf >= a else pre
+    return 0.95, 1.0 + 0.1 * k, 0, 0, 4 * k
+
+
+def _a_dropkick(mf, a, b, n, pre, act, post):
+    if mf < 4:
+        return 1.1, 0.85, 0, 0, 0
+    k = 1 - post
+    return 1, 1, 80 * k, 0, 22 * k
+
+
+def _a_vault(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1.1, 1.0 - 0.15 * pre, 0, 0, 0
+    k = 1 - post
+    return 0.92, 1.15 * k + (1 - k), 0, 0, 42 * k
+
+
+def _a_breakdance(mf, a, b, n, pre, act, post):
+    spin = -((mf - a + 3) * 30) % 360 if a - 3 <= mf <= b + 3 else 0
+    return 1.1, 0.78, spin, 0, -4
+
+
+def _a_whip(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1, 1, -35 * pre, -4 * pre, 0
+    return 1, 1, 25 * (1 - post), 6 * (1 - post), 0
+
+
+def _a_flick(mf, a, b, n, pre, act, post):
+    k = 1.0 if act else 0.0
+    return 1 - 0.08 * k, 1 + 0.14 * k, -4 * k, 0, 2 * k
+
+
+def _a_bellyglide(mf, a, b, n, pre, act, post):
+    k = min(1.0, mf / 3.0) * (1 - post)
+    return 1.05, 0.9, 85 * k, 0, -12 * k
+
+
+def _a_tailspin(mf, a, b, n, pre, act, post):
+    spin = -((mf - a) * 30) % 360 if a <= mf <= b + 3 else 0
+    return 1.05, 0.85, spin, 0, 0
+
+
+def _a_bonk(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1, 1, -16 * pre, -4 * pre, 0
+    return 1.04, 0.96, 22 * (1 - post), 10 * (1 - post), 0
+
+
+def _a_bellybounce(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1 + 0.25 * pre, 1 - 0.25 * pre, 0, 0, 0
+    k = 1 - post
+    return 1 - 0.15 * k, 1 + 0.2 * k, 0, 0, 10 * k
+
+
+def _a_slam(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1, 1 + 0.08 * pre, -6 * pre, 0, 4 * pre
+    k = 1 - post
+    return 1 + 0.25 * k, 1 - 0.3 * k, 18 * k, 4 * k, 0
+
+
+def _a_shoulder(mf, a, b, n, pre, act, post):
+    k = 1 - post if mf >= 3 else mf / 3.0
+    return 1.08, 0.96, 20 * k, 12 * k, 0
+
+
+def _a_bellybump(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 1 + 0.06 * pre, 1, -20 * pre, -10 * pre, 0
+    k = 1 - post
+    return 1.15, 0.95, 26 * k, 26 * k, 0
+
+
+def _a_groundpound(mf, a, b, n, pre, act, post):
+    if mf < a:
+        return 0.95, 1.08, 0, 0, 46 * math.sin(pre * math.pi * 0.95)
+    k = 1 - post
+    return 1 + 0.3 * k, 1 - 0.32 * k, 0, 0, 0
+
+
+V4_ANIMS = {"slap2": _a_slap2, "hop": _a_hop, "tumble": _a_tumble, "tantrum": _a_tantrum, "lunge": _a_lunge,
+            "kneeslide": _a_kneeslide, "sweep": _a_sweep, "ganon": _a_ganon, "twirl": _a_twirl,
+            "dropkick": _a_dropkick, "vault": _a_vault, "breakdance": _a_breakdance, "whip": _a_whip,
+            "flick": _a_flick, "bellyglide": _a_bellyglide, "tailspin": _a_tailspin, "bonk": _a_bonk,
+            "bellybounce": _a_bellybounce, "slam": _a_slam, "shoulder": _a_shoulder, "bellybump": _a_bellybump,
+            "groundpound": _a_groundpound}
+
+
 def f_h(f):
     return characters.CHARACTERS[f["c"]]["h"]
 
@@ -599,6 +745,8 @@ LIMB_COLOR = {"chiikawa": (255, 255, 255), "hachiware": (255, 255, 255), "usagi"
 
 
 def limb_kind(char_key, move_name, move):
+    if move.get("limb"):
+        return move["limb"]
     if move.get("weapon"):
         return "weapon"
     k = LIMB_OVERRIDE.get(char_key, {}).get(move_name) or LIMB_DEFAULT.get(move_name)
@@ -1024,11 +1172,15 @@ class Renderer:
                     x = hx + k_ * r * 0.5
                     pygame.draw.line(self.fx, (255, 255, 255, alpha), (x, hy - r), (x, hy + r * 0.8), max(2, int(r * 0.12)))
                 pygame.draw.circle(self.fx, col + (int(alpha * 0.6),), (int(hx), int(hy + r * 0.4)), int(r * 0.6))
-            elif kind == "ground":
-                pygame.draw.ellipse(self.fx, (255, 255, 255, alpha),
-                                    pygame.Rect(int(hx - r * 1.2), int(hy - r * 0.35), int(r * 2.4), int(r * 0.7)))
-                pygame.draw.ellipse(self.fx, col + (alpha,),
-                                    pygame.Rect(int(hx - r * 1.2), int(hy - r * 0.35), int(r * 2.4), int(r * 0.7)), max(2, int(r * 0.12)))
+            elif kind == "none":
+                pass
+            elif kind == "ground":       # dust kicked up where it hits the floor
+                k = min(1.0, max(0.0, (mf - a) / 8.0))
+                da = int(150 * fade)
+                for i in (-1, 0, 1):
+                    rr = max(2, int(r * (0.45 - 0.12 * abs(i)) * (0.7 + 0.5 * k)))
+                    pygame.draw.circle(self.fx, (232, 226, 214, da),
+                                       (int(hx + i * r * (0.6 + 0.6 * k)), int(hy + r * 0.3 - k * r * 0.5)), rr)
             elif kind in ("shout", "burp"):
                 k = (mf - a) / max(1, b - a + 4)
                 for i in range(3):

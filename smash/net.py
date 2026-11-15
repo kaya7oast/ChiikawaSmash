@@ -241,7 +241,7 @@ class Client:
             self.send({"t": "hello", "name": self.name, "char": self.char})
         elif self.slot is not None and self.status == "lobby" and now - self.last_pick > 0.5:
             self.send_pick()
-        if now - self.last_heard > HOST_TIMEOUT and self.status not in ("full", "closed", "nohost"):
+        if now - self.last_heard > HOST_TIMEOUT and self.status not in ("full", "closed", "nohost", "noroute"):
             self.status = "lost"
 
     def send_pick(self):

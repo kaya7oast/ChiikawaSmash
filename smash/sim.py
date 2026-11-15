@@ -1748,8 +1748,7 @@ class Game:
             if not projectile:
                 t.hitlag = f.hitlag = min(24, hl + 3)
         self.shake = max(self.shake, min(16, 2 + kb / 18.0))
-        if strong:
-            self.fx("ring", t.x, t.cy, s=1.2, col=(255, 255, 255))
+        if strong:     # (the big yellow hit spark + screen shake already sell it; no extra ring)
             t._big_hit = 1
 
     def push_apart(self):

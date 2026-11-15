@@ -527,10 +527,10 @@ def _tune(c):
 # Juggle tools of the fast characters get more end lag / send further (harder to chain),
 # slow projectiles come out sooner. Format: move -> {frames, land, kbg (+ added to every hitbox), proj_frame}
 BALANCE = {
-    "usagi": {"utilt": {"frames": 36, "kbg": 10}, "uair": {"frames": 38, "land": 10, "kbg": 8},
+    "usagi": {"uair": {"frames": 38, "land": 10, "kbg": 8},
               "nair": {"land": 11}, "jab_fin": {"kbg": 6}},
-    "momonga": {"utilt": {"frames": 30, "kbg": 10}, "uair": {"frames": 36, "kbg": 8}, "nair": {"land": 9}},
-    "kurimanju": {"utilt": {"frames": 38, "kbg": 8}, "uair": {"frames": 40, "kbg": 8}, "nair": {"frames": 44, "land": 12},
+    "momonga": {"uair": {"frames": 36, "kbg": 8}, "nair": {"land": 9}},
+    "kurimanju": {"uair": {"frames": 40, "kbg": 8}, "nair": {"frames": 44, "land": 12},
                   "sspec": {"proj_frame": 12}},
     "chiikawa": {"nspec": {"proj_frame": 11}},
     "kani": {"nspec": {"proj_frame": 10}},
@@ -554,7 +554,10 @@ def _balance(key, c):
     return c
 
 
-CHARACTERS = {f.__name__: _balance(f.__name__, _tune(f())) for f in (chiikawa, hachiware, usagi, momonga, kurimanju, kani)}
+from . import ground_moves  # noqa: E402  (new tilts / dash attacks / smashes, layered over the base moves)
+
+CHARACTERS = {f.__name__: _balance(f.__name__, _tune(ground_moves.apply(f.__name__, f())))
+              for f in (chiikawa, hachiware, usagi, momonga, kurimanju, kani)}
 
 # names shown above a fighter when they use a special
 SPECIAL_NAMES = {

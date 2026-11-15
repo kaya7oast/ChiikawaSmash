@@ -3,6 +3,16 @@
 // Room code "1234" -> PeerJS id "chiikawa-smash-1234" on the free PeerJS cloud server.
 window.SmashNet = (function () {
   var PREFIX = "chiikawa-smash-";
+  // Relay (TURN) for friends on different networks / mobile data. Paste your Metered Open Relay
+  // credentials URL here (free account): "https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=YOURKEY"
+  var TURN_API = "";
+  var iceServers = null;
+  function withIce(cb) {
+    if (!TURN_API || iceServers) { cb(); return; }
+    fetch(TURN_API).then(function (r) { return r.json(); })
+      .then(function (list) { iceServers = list; cb(); })
+      .catch(function () { cb(); });           // relay unavailable: still try direct
+  }
   var peer = null, conns = {}, hostConn = null, inbox = [], state = "idle", err = "";
 
   function push(from, data) {
@@ -26,7 +36,9 @@ window.SmashNet = (function () {
   }
   function make(id) {
     if (typeof Peer === "undefined") { state = "error"; err = "PeerJS didn't load (no internet?)"; return null; }
-    var p = id ? new Peer(id, { debug: 0 }) : new Peer({ debug: 0 });
+    var opts = { debug: 0 };
+    if (iceServers) opts.config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }].concat(iceServers) };
+    var p = id ? new Peer(id, opts) : new Peer(opts);
     p.on("error", function (e) {
       err = (e && e.type) || String(e);
       if (err === "unavailable-id") state = "taken";
@@ -45,17 +57,22 @@ window.SmashNet = (function () {
   return {
     host: function (code) {
       reset(); state = "connecting";
-      peer = make(PREFIX + code); if (!peer) return;
-      peer.on("open", function () { state = "ready"; });
-      peer.on("connection", function (c) { wire(c, true); });
+      withIce(function () {
+        peer = make(PREFIX + code); if (!peer) return;
+        peer.on("open", function () { state = "ready"; });
+        peer.on("connection", function (c) { wire(c, true); });
+      });
     },
     join: function (code) {
       reset(); state = "connecting";
-      peer = make(null); if (!peer) return;
-      peer.on("open", function () {
-        var c = peer.connect(PREFIX + code, { reliable: false, serialization: "raw" });
-        wire(c, false);
-        setTimeout(function () { if (state === "connecting") { state = "nohost"; } }, 12000);
+      withIce(function () {
+        peer = make(null); if (!peer) return;
+        peer.on("open", function () {
+          var c = peer.connect(PREFIX + code, { reliable: false, serialization: "raw" });
+          wire(c, false);
+          // room exists but no direct route (different networks, no relay): report it instead of hanging
+          setTimeout(function () { if (state === "connecting") { state = err === "peer-unavailable" ? "nohost" : "noroute"; } }, 15000);
+        });
       });
     },
     send: function (to, text) {

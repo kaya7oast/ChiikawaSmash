@@ -994,13 +994,15 @@ class ClientLobbyScene(Scene):
         super().update()
         c = self.client
         c.poll()
-        if c.status in ("lost", "closed", "full", "nohost"):
+        if c.status in ("lost", "closed", "full", "nohost", "noroute"):
             msg = {"lost": "Couldn't reach the host" + (" (try both on the same Wi-Fi)" if IS_WEB else
                                                            " (check the IP / firewall / same Wi-Fi)"),
                    "closed": "The host closed the game", "full": "That game is full",
-                   "nohost": "No room with code %s" % getattr(c, "code", "")}[c.status]
+                   "nohost": "No room with code %s" % getattr(c, "code", ""),
+                   "noroute": "Found the room but couldn't connect - try the same Wi-Fi"}[c.status]
             c.close()
-            self.app.go(RoomJoinScene(self.app, msg) if IS_WEB and c.status == "nohost" else TitleScene(self.app, msg))
+            self.app.go(RoomJoinScene(self.app, msg) if IS_WEB and c.status in ("nohost", "noroute")
+                        else TitleScene(self.app, msg))
             return
         # taps: < > to pick, READY, LEAVE
         for k, rc in self.btns.items():

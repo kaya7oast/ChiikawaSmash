@@ -134,7 +134,14 @@ class WebHost(net.Host):
         self._open_room()
 
     def _open_room(self):
-        self.code = "".join(random.choice("0123456789") for _ in range(ROOM_DIGITS))
+        # the browser build starts Python's RNG from the same seed every time (everyone got 2914!),
+        # so mix in real randomness: the OS / browser crypto source, falling back to the clock
+        try:
+            rng = random.SystemRandom()
+            rng.random()
+        except Exception:
+            rng = random.Random(time.time_ns() ^ id(self))
+        self.code = "".join(rng.choice("0123456789") for _ in range(ROOM_DIGITS))
         self.started = time.time()
         self.b.host(self.code)
 
@@ -182,8 +189,8 @@ class WebClient(net.Client):
 
     def _recv(self):
         st = str(self.b.status())
-        if st == "nohost":
-            self.status = "nohost"
+        if st in ("nohost", "noroute"):
+            self.status = st
         elif st == "error" and self.status == "connecting":
             self.status = "lost"
         if st != "ready" and time.time() - self.started < 15:
