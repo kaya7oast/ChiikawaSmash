@@ -94,19 +94,8 @@ behave like Smash frame data.
 ## Play on your phone (browser version)
 
 The game also runs in a phone browser, with touch controls and battles against CPUs. LAN play isn't available there because browsers can't do it.
-
-1. On github.com, create a **new empty repo** called `ChiikawaSmash` (don't add a README).
-2. Double-click `connect_github.bat` to upload this folder.
-3. On GitHub, open the repo's **Settings → Pages** and set **Source** to **GitHub Actions**.
-4. About 3 minutes later the game is live at **https://kaya7oast.github.io/ChiikawaSmash/**. The first load takes a while.
-
-To publish changes later, run `push_update.bat`.
-
 Playing on the phone:
 - Turn the phone sideways.
 - Drag anywhere on the left half to move.
 - Use the buttons on the right to attack, special, jump, shield, grab and smash.
 - The **||** button in the top-left pauses the game.
-- On iPhone, "Add to Home Screen" makes it open full screen.
-
-To try the phone layout on your PC, run `play_touch_layout.bat`. The mouse acts as a single finger.
