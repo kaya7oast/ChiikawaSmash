@@ -1,0 +1,9 @@
+/* Keep the 1280x720 game letterboxed inside whatever is visible, in portrait or landscape. */
+html, body { margin: 0 !important; padding: 0 !important; width: 100% !important; height: 100% !important;
+  overflow: hidden !important; background: #2b1e24 !important; overscroll-behavior: none; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-text-size-adjust: 100%; }
+canvas#canvas { position: fixed !important; inset: 0 !important; margin: auto !important;
+  width: min(100vw, calc(100vh * 16 / 9)) !important; height: min(100vh, calc(100vw * 9 / 16)) !important;
+  width: min(100dvw, calc(100dvh * 16 / 9)) !important; height: min(100dvh, calc(100dvw * 9 / 16)) !important;
+  max-width: none !important; max-height: none !important; transform: none !important;
+  outline: none; touch-action: none; }
