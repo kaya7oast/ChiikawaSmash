@@ -1,0 +1,79 @@
+# Builds the browser/phone version with pygbag and publishes it to GitHub Pages
+# on every push to main. One-time setup: repo Settings -> Pages -> Source: "GitHub Actions".
+name: Build web version
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pygbag
+        run: pip install pygbag
+      - name: Leave out PC-only stuff (art sources, tools, previews) so the download is small
+        run: rm -rf art_src old tools preview_*.png play.bat
+      - name: Build web version
+        run: python -m pygbag --build --title "Chiikawa Smash" .
+      - name: Fit the 1280x720 game to any phone screen + background colour
+        run: |
+          python - <<'PYEOF'
+          p = "build/web/index.html"
+          html = open(p, encoding="utf-8").read()
+          style = ("<meta name='mobile-web-app-capable' content='yes'><meta name='apple-mobile-web-app-capable' content='yes'>"
+                   "<style>html,body{background:#2b1e24 !important;overscroll-behavior:none;touch-action:none;}"
+                   "canvas{outline:none;touch-action:none}</style>")
+          script = """<script>
+          (function(){
+            function fitGame(){
+              var c = document.getElementById('canvas'); if (!c) return;
+              var W = 1280, H = 720, vw = window.innerWidth, vh = window.innerHeight;
+              var s = Math.min(vw / W, vh / H), w = Math.floor(W * s), h = Math.floor(H * s);
+              Object.assign(c.style, {position:'fixed', width:w+'px', height:h+'px',
+                left:Math.floor((vw-w)/2)+'px', top:Math.floor((vh-h)/2)+'px', margin:'0', outline:'none'});
+            }
+            window.addEventListener('resize', function(){ setTimeout(fitGame, 150); });
+            window.addEventListener('orientationchange', function(){ setTimeout(fitGame, 300); });
+            window.addEventListener('load', fitGame);
+            setInterval(fitGame, 1000);
+            // first touch: try to go full screen + lock landscape (works on Android; iPhone: Add to Home Screen)
+            document.addEventListener('touchend', function once(){
+              document.removeEventListener('touchend', once);
+              var el = document.documentElement;
+              try { (el.requestFullscreen || el.webkitRequestFullscreen).call(el).then(function(){
+                    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function(){}); }); } catch(e) {}
+            });
+          })();
+          </script>"""
+          html = html.replace("</head>", style + "</head>", 1).replace("</body>", script + "</body>", 1)
+          open(p, "w", encoding="utf-8").write(html)
+          print("patched:", "fitGame" in html)
+          PYEOF
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

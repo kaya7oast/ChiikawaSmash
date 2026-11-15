@@ -1,0 +1,32 @@
+{
+ "chiikawa": {
+  "src_h": 280,
+  "hand_dir": 36.8,
+  "foot_dir": 112.4
+ },
+ "hachiware": {
+  "src_h": 287,
+  "hand_dir": 28.6,
+  "foot_dir": 120.9
+ },
+ "usagi": {
+  "src_h": 319,
+  "hand_dir": 37.3,
+  "foot_dir": 109.6
+ },
+ "momonga": {
+  "src_h": 303,
+  "hand_dir": 51.9,
+  "foot_dir": 75.9
+ },
+ "kurimanju": {
+  "src_h": 282,
+  "hand_dir": 39.5,
+  "foot_dir": 167.4
+ },
+ "kani": {
+  "src_h": 308,
+  "hand_dir": 35.7,
+  "foot_dir": 108.9
+ }
+}
