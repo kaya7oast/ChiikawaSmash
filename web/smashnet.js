@@ -6,7 +6,13 @@ window.SmashNet = (function () {
   // Relay (TURN) for friends on different networks / mobile data. Paste your Metered Open Relay
   // credentials URL here (free account): "https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=YOURKEY"
   var TURN_API = "";
-  var iceServers = null;
+  // ...or fixed credentials from a TURN dashboard (e.g. ExpressTURN free plan): fill in all three.
+  var TURN_URL = "free.expressturn.com:3478";        // e.g. "relay1.expressturn.com:3478"  (shown in your dashboard)
+  var TURN_USER = "000000002110153387";
+  var TURN_PASS = "kHNH6xcZ4fv+wUs7a7B0QNpGt34=";
+  var iceServers = TURN_URL ? [
+    { urls: ["turn:" + TURN_URL, "turn:" + TURN_URL + "?transport=tcp"], username: TURN_USER, credential: TURN_PASS }
+  ] : null;
   function withIce(cb) {
     if (!TURN_API || iceServers) { cb(); return; }
     fetch(TURN_API).then(function (r) { return r.json(); })
