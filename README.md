@@ -114,3 +114,15 @@ Notes:
 - Being on the same Wi-Fi always works. On mobile data, some carriers block direct connections. If someone can't join, try Wi-Fi.
 - Online play uses the free PeerJS matchmaking server (peerjs.com). After that, devices talk to each other directly.
 - In an online match, tap **||** twice to leave.
+
+## New fighters (v5)
+
+| Fighter | Style | Neutral B | Side B | Up B | Down B |
+|---|---|---|---|---|---|
+| **Rakko** | swordsman: long reach, tippers | Charged Slam (hold) | Minecart: rides forward, jump to hop out | Rising Slash | Shadow Counter: warps behind the attacker |
+| **Chikkabu** (small) | light and fast | Latch Counter: latches onto the attacker for 3s (5%/s to them, heals 2%/s) | Horn Charge | Beetle Flight | Bulk Up: hold to fill the meter. Full = big form for 20s |
+| **Chikkabu** (big) | heavy brute, armored moves | Giant Punch (hold) | Horn Punch (armored) | Cross Chop: rise, then dive | Hand Slap: mash B, sends shockwaves |
+| **Siren** | floaty zoner | Siren Song: 2 vines grow from the floor | Mermaid Rush: max 2 mermaids, one returns every 7s | Water Spout | Tidal Slam: waves both ways (hold for bigger) |
+
+- Dealing damage also fills Chikkabu's bulk meter. The meter and the big-form timer show on his damage card.
+- At 100% or more, Siren becomes enraged: her art changes and she deals 10% more damage.

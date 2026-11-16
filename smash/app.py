@@ -555,7 +555,8 @@ class CharSelectScene(Scene):
         # roster grid: just the character and their name
         ps = self.players()
         n = len(ROSTER)
-        cw, ch, gap = 170, 196, 14
+        gap = 12 if n > 6 else 14
+        cw, ch = min(170, int((WIDTH - 40 - (n - 1) * gap) / n)), 196      # one row, shrinks to fit the roster
         gx = WIDTH / 2 - (n * cw + (n - 1) * gap) / 2
         gy = 106
         self.portrait_rects = []
@@ -567,9 +568,11 @@ class CharSelectScene(Scene):
             panel(surf, rect, alpha=225, border=border, radius=18)
             c = characters.CHARACTERS[k]
             spr = r.images.sprite(k, 128)
+            if spr.get_width() > cw - 12:                     # wide sprites (Siren, Rakko) still fit the card
+                spr = r.images.sprite(k, int(128 * (cw - 12) / spr.get_width()))
             bob = math.sin(self.t * 0.08 + i) * 3 if chosen else 0
             surf.blit(spr, spr.get_rect(midbottom=(rect.centerx, rect.bottom - 42 + bob)))
-            text(surf, c["name"], 22, c["color"], (rect.centerx, rect.bottom - 22), outline=INK, ow=2)
+            text(surf, c["name"], 22 if cw >= 150 else 17, c["color"], (rect.centerx, rect.bottom - 22), outline=INK, ow=2)
             # little P1/P2 badges for whoever is hovering this character
             for j, p in enumerate(chosen):
                 cx = rect.right - 20 - 30 * j
@@ -1176,6 +1179,8 @@ class App:
         self.devices = DeviceManager()
         self.renderer = Renderer()
         self.running = True
+        self._frame_taps = []
+        self.dt_ms = 1000.0 / FPS
         self.scene = TitleScene(self)
         self.show_fps = False
 

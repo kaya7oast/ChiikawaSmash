@@ -68,6 +68,8 @@ class Images:
         self.cache = {}
         for key, c in characters.CHARACTERS.items():
             self.base[key] = self._load(c["image"])
+        self.base["siren_enraged"] = self._load("siren_enraged")      # Siren at 100%+
+        self.mermaid = self._load("mermaid")
         self.claw = self._load("Kani_crabclaw")
         self.dekatsuyo = self._load("dekatsuyo")
         # hands / feet cropped from each character's own art (assets/parts)
@@ -458,6 +460,9 @@ def body_pose(f, move):
     elif st == "grabbed":
         rot = -10 + math.sin(t * 0.8) * 4
         sy = 0.95
+    elif st == "latched":            # clinging to someone's head, gnawing away
+        rot = math.sin(t * 0.9) * 10
+        sy, sx = 0.9, 1.08
     elif st == "holding":
         rot = 6
         ox = 4
@@ -708,7 +713,30 @@ def _a_groundpound(mf, a, b, n, pre, act, post):
     return 1 + 0.3 * k, 1 - 0.32 * k, 0, 0, 0
 
 
-V4_ANIMS = {"slap2": _a_slap2, "hop": _a_hop, "tumble": _a_tumble, "tantrum": _a_tantrum, "lunge": _a_lunge,
+def _a_cart(mf, a, b, n, pre, act, post):
+    return 1.0, 0.92, 4, 0, 14 * min(1.0, mf / 6.0) * (1 - post)       # sitting up in the cart
+
+
+def _a_bulk(mf, a, b, n, pre, act, post):
+    k = min(1.0, mf / 6.0)
+    return 1.0 + 0.08 * k, 1.0 - 0.06 * k, 0, math.sin(mf * 2.3) * 3 * k, 0     # straining, shaking
+
+
+def _a_crosschop(mf, a, b, n, pre, act, post):
+    if mf < 17:
+        return 0.92, 1.1, -10, 0, 0
+    if mf < 25:
+        return 1, 1, -20 + (mf - 17) * 6, 0, 0
+    return 1.05, 0.95, 40 * (1 - post), 0, 0
+
+
+def _a_handslap(mf, a, b, n, pre, act, post):
+    side = 1 if (mf // 6) % 2 == 0 else -1
+    return 1.12, 0.84, 12 * side, 0, 0
+
+
+V4_ANIMS = {"cart": _a_cart, "bulk": _a_bulk, "crosschop": _a_crosschop, "handslap": _a_handslap,
+            "slap2": _a_slap2, "hop": _a_hop, "tumble": _a_tumble, "tantrum": _a_tantrum, "lunge": _a_lunge,
             "kneeslide": _a_kneeslide, "sweep": _a_sweep, "ganon": _a_ganon, "twirl": _a_twirl,
             "dropkick": _a_dropkick, "vault": _a_vault, "breakdance": _a_breakdance, "whip": _a_whip,
             "flick": _a_flick, "bellyglide": _a_bellyglide, "tailspin": _a_tailspin, "bonk": _a_bonk,
@@ -741,7 +769,8 @@ LIMB_OVERRIDE = {
     "kani": {"uspec": "body", "dspec": "body", "tether_kick": "grab"},
 }
 LIMB_COLOR = {"chiikawa": (255, 255, 255), "hachiware": (255, 255, 255), "usagi": (252, 239, 202),
-              "momonga": (255, 255, 255), "kurimanju": (252, 233, 203), "kani": (254, 238, 232)}
+              "momonga": (255, 255, 255), "kurimanju": (252, 233, 203), "kani": (254, 238, 232),
+              "rakko": (250, 240, 222), "chikkabu": (156, 108, 72), "chikkabu_big": (128, 86, 56), "siren": (255, 255, 255)}
 
 
 def limb_kind(char_key, move_name, move):
@@ -830,7 +859,7 @@ class Renderer:
         for f in fighters:
             if f["al"] and not f["dd"]:
                 self.draw_shadow(surf, f, stage)
-        for f in fighters:
+        for f in sorted(fighters, key=lambda f_: f_["st"] == "latched"):   # latched Chikkabu on top of his host
             if f["al"] and not f["dd"]:
                 self.draw_fighter(surf, f, snap)
         for p in snap["p"]:
@@ -889,7 +918,8 @@ class Renderer:
             rot = 0.0 if pose[0] != "chii_bair" else rot * 0.5
             sx, sy = 1.0 + (sx - 1.0) * 0.5, 1.0 + (sy - 1.0) * 0.5
         else:
-            spr = self.images.sprite(f["c"], H, flip=face < 0)
+            skey = "siren_enraged" if (f["c"] == "siren" and f["d"] >= 100 and self.images.base.get("siren_enraged")) else f["c"]
+            spr = self.images.sprite(skey, H, flip=face < 0)
         w, h = spr.get_size()
         if abs(sx - 1) > 0.01 or abs(sy - 1) > 0.01:
             spr = pygame.transform.smoothscale(spr, (max(2, int(w * sx)), max(2, int(h * sy))))
@@ -1414,6 +1444,25 @@ class Renderer:
             pygame.draw.circle(surf, (255, 235, 120), (canopy.centerx, int(canopy.y + canopy.h * 0.32)), max(3, int(cam.s(6))))
             for sx_ in (canopy.x + 4, canopy.centerx, canopy.right - 4):
                 pygame.draw.line(surf, INK, (sx_, canopy.centery), (centre[0], centre[1] - h * 0.3), 2)
+        # Rakko's minecart
+        if move and move.get("cart") and f["mf"] >= 3:
+            fx_, fy_ = cam.pt(f["x"], f["y"])
+            cw_, ch_ = cam.s(c["w"] * 1.5), cam.s(c["h"] * 0.42)
+            box = pygame.Rect(0, 0, int(cw_), int(ch_))
+            box.midbottom = (int(fx_), int(fy_ - cam.s(10)))
+            pygame.draw.rect(surf, INK, box.inflate(6, 6), border_radius=6)
+            pygame.draw.rect(surf, (128, 92, 62), box, border_radius=5)
+            for i in (1, 2):
+                yy = box.y + box.h * i // 3
+                pygame.draw.line(surf, (96, 66, 44), (box.x + 4, yy), (box.right - 4, yy), max(2, int(cam.s(3))))
+            pygame.draw.rect(surf, (170, 170, 180), pygame.Rect(box.x - 2, box.y - 2, box.w + 4, max(3, int(cam.s(6)))), border_radius=3)
+            wr = max(3, int(cam.s(9)))
+            spin = f["mf"] * 0.6
+            for wx in (box.x + box.w * 0.22, box.x + box.w * 0.78):
+                pygame.draw.circle(surf, INK, (int(wx), box.bottom + wr // 2), wr + 2)
+                pygame.draw.circle(surf, (90, 90, 100), (int(wx), box.bottom + wr // 2), wr)
+                pygame.draw.line(surf, (160, 160, 170), (wx - math.cos(spin) * wr, box.bottom + wr // 2 - math.sin(spin) * wr),
+                                 (wx + math.cos(spin) * wr, box.bottom + wr // 2 + math.sin(spin) * wr), 2)
         # sleeping: Zzz
         if f["st"] == "sleep":
             for i in range(3):
@@ -1616,6 +1665,27 @@ class Renderer:
             pygame.draw.rect(b, (250, 220, 120), pygame.Rect(4, int(br.h * 0.5), br.w - 8, int(br.h * 0.2)))
             b = pygame.transform.rotate(b, p["a"] * 14)
             surf.blit(b, b.get_rect(center=(int(x), int(y))))
+        elif k == "mermaid" and self.images.mermaid is not None:
+            img = self.images.scaled(self.images.mermaid, r * 2.2 * self.images.mermaid.get_width() / self.images.mermaid.get_height(), r * 2.2)
+            if p["fa"] < 0:
+                img = pygame.transform.flip(img, True, False)
+            img = pygame.transform.rotate(img, -12 * p["fa"])
+            surf.blit(img, img.get_rect(center=(int(x), int(y))))
+        elif k == "vine":
+            grow = min(1.0, p["a"] / 10.0) * min(1.0, p["lf"] / 20.0)
+            L = r * 2.4 * grow
+            sway = math.sin(p["a"] * 0.12) * 0.35
+            if L > 4:
+                base = (x, y + r * 0.2)
+                tip = (x + math.sin(sway) * L, y + r * 0.2 - math.cos(sway) * L)
+                self._weapon_shape(surf, "weed", base, tip, L)
+        elif k == "wave":
+            a_ = max(0, min(200, int(200 * min(1.0, p["lf"] / 12.0))))
+            d = 1 if p["vx"] >= 0 else -1
+            pts = [(x - d * r * 1.2, y + r * 0.6), (x - d * r * 0.4, y - r * 0.9), (x + d * r * 0.5, y - r * 1.1),
+                   (x + d * r * 1.1, y - r * 0.3), (x + d * r * 0.7, y + r * 0.6)]
+            pygame.draw.polygon(self.fx, (90, 170, 230, a_), pts)
+            pygame.draw.lines(self.fx, (235, 248, 255, a_), False, pts[1:4], max(2, int(r * 0.18)))
         elif k == "puddle":
             a_ = max(0, min(150, int(150 * min(1.0, p["lf"] / 30.0))))
             pr = pygame.Rect(0, 0, int(r * 2.2), int(r * 0.6))
@@ -1792,6 +1862,26 @@ class Renderer:
                 pygame.draw.circle(surf, WHITE, (cx, cy), 9)
                 mini = self.images.sprite(f["c"], 16)
                 surf.blit(mini, mini.get_rect(center=(cx, cy)))
+            if f["c"] in ("chikkabu", "chikkabu_big") and alive:
+                bar = pygame.Rect(r.x + 98, r.y + 28, 76, 12)
+                pygame.draw.rect(surf, (60, 46, 40), bar, border_radius=6)
+                fill = bar.copy()
+                if f.get("ft", 0) > 0:
+                    fill.w = max(2, int(bar.w * f["ft"] / 1200.0))
+                    pygame.draw.rect(surf, (240, 120, 60), fill, border_radius=6)
+                    text(surf, "BIG", 11, WHITE, bar.center, outline=BLACK, ow=1)
+                else:
+                    fill.w = max(0, int(bar.w * f.get("bk", 0)))
+                    if fill.w:
+                        pygame.draw.rect(surf, (200, 150, 90) if f.get("bk", 0) < 1 else (255, 210, 90), fill, border_radius=6)
+                pygame.draw.rect(surf, WHITE, bar, 1, border_radius=6)
+            if f["c"] == "siren" and alive and self.images.mermaid is not None:
+                for i in range(2):
+                    mimg = self.images.scaled(self.images.mermaid, 20, 22)
+                    if i >= f.get("mm", 0):
+                        mimg = mimg.copy()
+                        mimg.set_alpha(60)
+                    surf.blit(mimg, (r.x + 98 + i * 24, r.y + 24))
             if f.get("art"):
                 a_ = ARTS[f["art"]]
                 badge = pygame.Rect(r.x + 98, r.y + 26, 76, 18)

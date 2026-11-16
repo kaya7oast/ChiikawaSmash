@@ -42,6 +42,9 @@ jobs:
           html = re.sub(r"<meta[^>]*name=[\"']viewport[\"'][^>]*>", "", html)
           style = ("<meta name='viewport' content='width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'>"
                    "<meta name='mobile-web-app-capable' content='yes'><meta name='apple-mobile-web-app-capable' content='yes'>"
+                   "<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>"
+                   "<meta name='apple-mobile-web-app-title' content='Chiikawa Smash'>"
+                   "<link rel='manifest' href='manifest.webmanifest'>"
                    "<style>" + open("/tmp/fit.css", encoding="utf-8").read() + "</style>")
           script = "<script>" + open("/tmp/fit.js", encoding="utf-8").read() + "</script>"
           # online play: PeerJS (WebRTC) + our small bridge that Python talks to
@@ -49,6 +52,12 @@ jobs:
                     "<script>" + open("/tmp/smashnet.js", encoding="utf-8").read() + "</script>")
           html = html.replace("</head>", style + online + "</head>", 1).replace("</body>", script + "</body>", 1)
           open(p, "w", encoding="utf-8").write(html)
+          # 'Add to Home Screen' launches the game with no browser bars at all, sideways
+          import json
+          json.dump({"name": "Chiikawa Smash", "short_name": "Chiikawa Smash", "start_url": ".", "scope": ".",
+                     "display": "fullscreen", "orientation": "landscape",
+                     "background_color": "#2b1e24", "theme_color": "#2b1e24"},
+                    open("build/web/manifest.webmanifest", "w"))
           print("patched:", "fitGame" in html, "SmashNet" in html)
           PYEOF
       - uses: actions/upload-pages-artifact@v3

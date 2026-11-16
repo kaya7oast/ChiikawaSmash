@@ -556,8 +556,14 @@ def _balance(key, c):
 
 from . import ground_moves  # noqa: E402  (new tilts / dash attacks / smashes, layered over the base moves)
 
+from . import new_chars  # noqa: E402  (Rakko, Chikkabu + big form, Siren)
+
 CHARACTERS = {f.__name__: _balance(f.__name__, _tune(ground_moves.apply(f.__name__, f())))
               for f in (chiikawa, hachiware, usagi, momonga, kurimanju, kani)}
+for _f in new_chars.NEW:
+    CHARACTERS[_f.__name__] = _tune(_f())
+for _k, _c in CHARACTERS.items():
+    _c["key"] = _k
 
 # names shown above a fighter when they use a special
 SPECIAL_NAMES = {
@@ -569,11 +575,16 @@ SPECIAL_NAMES = {
     "momonga": {"nspec": "Kani Guard", "counter_hit": "Kani, get 'em!", "sspec": "Nibble Leap", "nibble": "Nom nom!",
                 "uspec": "Glide", "dspec": "Dekatsuyo!", "dair": "Dekatsuyo Drop!"},
     "kurimanju": {"nspec": "Burp", "sspec": "Bottle Lob", "uspec": "Beer Geyser", "dspec": "Drink Up"},
+    "rakko": {"nspec": "Charged Slam", "sspec": "Minecart", "uspec": "Rising Slash", "dspec": "Shadow Counter",
+              "counter_hit": "Too slow."},
+    "chikkabu": {"nspec": "Latch Counter", "sspec": "Horn Charge", "uspec": "Beetle Flight", "dspec": "Bulk Up"},
+    "chikkabu_big": {"nspec": "Giant Punch", "sspec": "Horn Punch", "uspec": "Cross Chop", "dspec": "Hand Slap"},
+    "siren": {"nspec": "Siren Song", "sspec": "Mermaid Rush", "uspec": "Water Spout", "dspec": "Tidal Slam"},
     "kani": {"nspec": "Book Toss", "sspec": "Pound Snip", "sspec_air": "Pound Snip", "uspec": "Claw Tether",
              "tether_kick": "Get over here!",
              "dspec": "Bedtime Reading"},
 }
-ROSTER = list(CHARACTERS.keys())
+ROSTER = [k for k, c in CHARACTERS.items() if not c.get("hidden")]   # big Chikkabu is a form, not a pick
 
 
 def get(char_key):

@@ -15,6 +15,17 @@ from .stages import STAGES, ledges, main_poly
 
 B_JUMP, B_ATK, B_SPC, B_SHD, B_GRB, B_SMS = 1, 2, 4, 8, 16, 32
 BUTTONS = ["jump", "atk", "spc", "shd", "grb", "sms"]
+
+# v5 characters
+BIG_FORM_FRAMES = 20 * 60        # Chikkabu's muscle form lasts 20 s
+BULK_HOLD_FRAMES = 150           # holding down-B from empty fills the meter in 2.5 s
+BULK_FROM_DAMAGE = 80.0          # dealing 80% also fills it
+LATCH_FRAMES = 3 * 60            # latch lasts 3 s, can't be shaken off
+LATCH_DMG_PER_S = 5.0
+LATCH_HEAL_PER_S = 2.0
+MERMAIDS_MAX = 2
+MERMAID_REGEN = 7 * 60           # a mermaid comes back every 7 s
+SIREN_RAGE_AT = 100.0
 BUTTON_BITS = [B_JUMP, B_ATK, B_SPC, B_SHD, B_GRB, B_SMS]
 BIT = dict(zip(BUTTONS, BUTTON_BITS))
 SPECIALS = ("nspec", "sspec", "uspec", "dspec")
@@ -139,8 +150,22 @@ class Fighter:
         self.last_hit_by = None
         self.last_hit_time = 0
         self.place = 0
+        # v5 characters
+        self.bulk = 0.0                           # Chikkabu: bulk meter 0..1
+        self.form_t = 0                           # Chikkabu: frames left in the big form
+        self.mermaids = 2 if char_key == "siren" else 0
+        self.mer_t = 0
+        self.latch_on = None                      # Chikkabu: who he's latched onto
+        self.latch_t = 0
 
     # ------------------------------------------------------------------ helpers
+    def set_form(self, key):
+        """Swap to another body (Chikkabu small <-> big): stats, moves and size change, feet stay put."""
+        self.c = characters.get(key)
+        self.moves = self.c["moves"]
+        self.w, self.h = self.c["w"], self.c["h"]
+        self.jumps_left = min(self.jumps_left, self.c["jumps"] - 1)
+
     def st(self, key):
         """A movement stat, with the current art's multiplier applied."""
         v = self.c[key]
@@ -372,6 +397,15 @@ class Game:
             f.buff_timer -= 1
             if f.buff_timer == 0:
                 f.buff = 1.0
+        if f.form_t > 0:                     # Chikkabu's big form wears off
+            f.form_t -= 1
+            if f.form_t == 0:
+                self.shrink(f)
+        if f.char_key == "siren" and f.mermaids < MERMAIDS_MAX:
+            f.mer_t += 1
+            if f.mer_t >= MERMAID_REGEN:
+                f.mer_t = 0
+                f.mermaids += 1
         if f.state != "shield":
             f.shield = min(SHIELD_MAX, f.shield + 0.09)
 
@@ -382,9 +416,58 @@ class Game:
             handler(f, inp)
         if f.dead or not f.alive:
             return
-        if f.state in ("ledge", "grabbed", "respawn", "tether"):
+        if f.state in ("ledge", "grabbed", "respawn", "tether", "latched"):
             return
         self.physics(f, inp)
+
+    # ---------- Chikkabu: forms + latch
+    def grow(self, f):
+        f.set_form(f.char_key + "_big")
+        f.form_t = BIG_FORM_FRAMES
+        f.bulk = 0.0
+        f.intang = max(f.intang, 20)
+        f.set_state("idle" if f.grounded else "air")
+        self.fx("buff", f.x, f.cy, s=1.6)
+        self.fx("dust", f.x, f.y, s=2.0)
+        self.shake = max(self.shake, 8)
+
+    def shrink(self, f):
+        if f.c.get("form_of"):
+            f.set_form(f.c["form_of"])
+            self.fx("smoke", f.x, f.cy, s=1.4)
+        f.form_t = 0
+        f.bulk = 0.0
+
+    def st_latched(self, f, inp):
+        """Stuck on someone's head: 5%/s to them, heals 2%/s, can't be knocked off for 3s."""
+        v = f.latch_on
+        if v is None or v.dead or not v.alive or f.latch_t <= 0 or v.state == "respawn":
+            self.unlatch(f)
+            return
+        f.latch_t -= 1
+        f.x, f.y = v.x - v.facing * 6, v.y - v.h + 10
+        f.vx = f.vy = f.kvx = f.kvy = 0.0
+        f.grounded = False
+        f.ground = None
+        f.intang = max(f.intang, 2)
+        if f.latch_t % 20 == 0:
+            d = LATCH_DMG_PER_S / 3.0
+            v.damage = min(999.0, v.damage + d)
+            v.last_hit_by, v.last_hit_time = f.slot, self.frame
+            f.stats["dealt"] += d
+            v.stats["taken"] += d
+            f.damage = max(0.0, f.damage - LATCH_HEAL_PER_S / 3.0)
+            self.fx("hit", v.x, v.y - v.h * 0.8, s=0.3, col=f.color)
+
+    def unlatch(self, f):
+        v = f.latch_on
+        f.latch_on = None
+        f.latch_t = 0
+        f.set_state("air")
+        f.grounded = False
+        f.vy = -9.0
+        f.vx = (3.0 if v is None or f.x >= v.x else -3.0)
+
 
     # ---------- actionable states
     def try_actions(self, f, inp):
@@ -766,12 +849,22 @@ class Game:
             return
         # charge: hold at the charge frame while the button is held
         # (smash attacks: smash/attack button, specials: special button)
+        if m.get("bulk") and f.bulk >= 1.0:          # meter full: transform right away
+            self.grow(f)
+            return
         if m.get("charge") and f.mf == m["charge"]:
             cmax = m.get("charge_max", 60)
             if f.move.startswith(SPECIALS):
                 held = inp.h(B_SPC)
             else:
                 held = inp.h(B_SMS) or inp.h(B_ATK)
+            if held and m.get("bulk"):
+                f.bulk = min(1.0, f.bulk + 1.0 / BULK_HOLD_FRAMES)
+                f.charging = True
+                f.sf -= 1
+                if f.bulk >= 1.0:
+                    self.grow(f)
+                return
             if held and f.charge < cmax:
                 f.charge += 1
                 f.charging = True
@@ -891,6 +984,10 @@ class Game:
             projs = m["proj_charged"]
         for pf, pd in projs:
             if mf == pf:
+                if m.get("mermaid"):              # Siren: only if a mermaid is home
+                    if f.mermaids <= 0:
+                        continue
+                    f.mermaids -= 1
                 self.spawn_projectile(f, pd, m)
         if m.get("heal") and mf == m["heal"][0]:
             f.damage = max(0.0, f.damage - m["heal"][1])
@@ -1599,6 +1696,8 @@ class Game:
         if hb.get("counter"):
             dmg = max(8.0, f.counter_dmg * 1.3)
         dmg *= f.art_mult("dealt") * t.art_mult("taken")
+        if f.char_key == "siren" and f.damage >= SIREN_RAGE_AT:      # enraged Siren hits 10% harder
+            dmg *= 1.1
         # stale-move negation: the more you've landed this move recently, the weaker it gets
         sk = self.stale_key(f, hb, projectile)
         dmg *= max(0.5, 1.0 - sum(w for w, k in zip(STALE_WEIGHTS, f.stale) if k == sk))
@@ -1613,7 +1712,23 @@ class Game:
         if tm and tm.get("counter") and tm["counter"][0] <= t.mf <= tm["counter"][1] and not unblockable:
             t.counter_dmg = dmg
             t.facing = 1 if f.x > t.x else -1
+            if tm.get("latch"):                       # Chikkabu jumps onto the attacker's head
+                t.latch_on, t.latch_t = f, LATCH_FRAMES
+                t.set_state("latched")
+                t.intang = 10
+                if not projectile:
+                    f.hitlag = 10
+                self.fx("counter", t.x, t.cy, s=1.0)
+                self.shake = max(self.shake, 5)
+                return
             t.start_move("counter_hit", self)
+            if t.moves["counter_hit"].get("warp_behind"):   # Rakko reappears behind the attacker
+                self.fx("smoke", t.x, t.cy, s=1.0)
+                t.x = f.x - f.facing * (f.w / 2 + t.w / 2 + 8)
+                t.y = f.y
+                t.facing = f.facing
+                t.grounded, t.ground = f.grounded, f.ground
+                t.vx = t.vy = t.kvx = t.kvy = 0.0
             t.intang = 10
             if not projectile:
                 f.hitlag = 18
@@ -1686,6 +1801,8 @@ class Game:
         t.damage = min(999.0, t.damage + dmg)
         f.stats["dealt"] += dmg
         t.stats["taken"] += dmg
+        if f.char_key == "chikkabu" and f.form_t == 0:
+            f.bulk = min(1.0, f.bulk + dmg / BULK_FROM_DAMAGE)
         t.last_hit_by = f.slot
         t.last_hit_time = self.frame
         kb = knockback(t.damage, dmg, t.c["weight"], hb["bkb"], hb["kbg"])
@@ -1797,6 +1914,9 @@ class Game:
             f.grabbed_by.set_state("idle")
             f.grabbed_by = None
         f.ledge = None
+        if f.form_t or f.c.get("form_of"):
+            self.shrink(f)
+        f.latch_on, f.latch_t = None, 0
         f.dead = True
         f.respawn_timer = 75
         f.kvx = f.kvy = f.vx = f.vy = 0.0
@@ -1820,6 +1940,8 @@ class Game:
         f.side_used = f.airdodge_used = False
         f.shield = SHIELD_MAX
         f.buff = 1.0
+        if f.char_key == "siren":
+            f.mermaids, f.mer_t = MERMAIDS_MAX, 0
         f.set_state("respawn")
         f.invuln = 120
         self.fx("respawn", f.x, f.y, col=f.color)
@@ -1847,7 +1969,7 @@ class Game:
         for f in self.fighters:
             m = f.move_data() if f.state == "attack" else None
             fs.append({
-                "s": f.slot, "c": f.char_key, "n": f.name, "col": list(f.color), "cpu": f.cpu,
+                "s": f.slot, "c": f.c.get("key", f.char_key), "bk": round(f.bulk, 2), "ft": f.form_t, "mm": f.mermaids, "n": f.name, "col": list(f.color), "cpu": f.cpu,
                 "x": round(f.x, 1), "y": round(f.y, 1), "vx": round(f.vx + f.kvx, 1), "vy": round(f.vy + f.kvy, 1),
                 "fa": f.facing, "st": f.state, "sf": f.sf, "mv": f.move or "", "mf": f.mf,
                 "d": round(f.damage, 1), "k": f.stocks, "sh": round(f.shield, 1),
